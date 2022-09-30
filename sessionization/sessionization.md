@@ -9,10 +9,12 @@ Apache Beam plays an important part in many of our product offerings at Talend a
 ## Runners in Beam
 
 The responsibility of a runner in Beam is to translate Beam pipelines into a native pipeline for the respective runtime environment, e.g. Apache Spark, and run the pipeline. This abstraction obviously provides great flexibility to users.
+To learn more about Beam runners and how the translation of pipelines is done, I recommend reading [this introduction](https://echauchot.blogspot.com/2020/02/understand-apache-beam-runners-focus-on.html) of our colleague Etienne.
 
 Beam's runner for Apache Spark is based on Spark's `RDD` API (in batch mode). However, there's also a new, experimental runner using Spark SQL with the more recent `Dataset` API. In the following we're going to explore how to improve the performance of aggregations on [Session windows](https://beam.apache.org/documentation/programming-guide/#session-windows) for that runner.
 
 A `Dataset` in Spark depends on an `Encoder` for (de-)serialization of data similar to `Coder`s in Beam.
+These convert a data point from and to a binary representation and are critical to efficiently move data between nodes of the distributed compute system.
 In the following we are going to ignore that aspect as it's a subject of its own.
 
 ## Aggregations in Beam
@@ -33,7 +35,7 @@ public abstract class CombineFn<InputT, AccumT, OutputT>{
   // Merge multiple accumulators.
   public abstract AccumT mergeAccumulators(Iterable<AccumT> accumulators);
 
-  // Extract the output of the accumulator.
+  // Extract the output of the resulting accumulator.
   public abstract OutputT extractOutput(AccumT accumulator);
 
   ...
@@ -54,30 +56,39 @@ public abstract class Aggregator<InputT, AccumT, OutputT> {
   // Merge two accumulators.
   public abstract AccumT merge(AccumT accumulator1, AccumT accumulator2)
 
-  // Extract the output of the accumulator.
+  // Extract the output of the resulting accumulator.
   public abstract OutputT finish(AccumT accumulator)
 
   ...
 }
 ```
 
-### Aggregations on none-merging windows
+### Aggregations on non-merging windows
 
-Non-merging bounded windows, including the global window, are the simplest case when translating `Combine.PerKey<KeyT, InputT, OutputT>` transforms.
-We don't have to evaluate windows (and potentially merge them) in the Spark aggregator. Instead we can move windows into a composite key (BoundedWindow, KeyT).
+Windows sub-devide datasets according to timestamps of individual data points, e.g. the data per fixed hourly window.
+The concept of windowing is critical when working with unbounded streams of data, but it also applies to batch processing, and scopes
+transformations such as aggregations to the respective window.
+
+In Beam's [windowing model](https://beam.apache.org/documentation/programming-guide/#windowing) every data point is assigned to one or several windows and
+represented as `WindowedValue<T>`. In batch this is by default a single global window, meaning everything.
+Our colleague Alexey wrote an [introduction to Beam windowing](https://aromanenko.blogspot.com/2019/03/data-processing-using-beam-part-3.html) if you're looking for further information.
+
+Fixed, non-merging bounded windows, including the single global window, are the simplest case when translating `Combine.PerKey<KeyT, InputT, OutputT>` transforms.
+These windows are independent of windows of other data points, so we don't have to evaluate and potentially merge them in the Spark aggregator.
+Instead we can move the windows into a composite key (BoundedWindow, KeyT).
 Especially if there's only few keys, this can even help to better scale out and mitigate potential problems due to skew in the data.
 
 However, a windowed value `WindowedValue<T>` could be assigned to multiple windows. For instance, that's the case with sliding windows:
 
-Consider a sliding window of 1 hour that advances ever 5 minutes. For each key we'd be generating 12 new composite keys.
+Consider a sliding window of 1 hour that advances ever 5 minutes. For each key we get 12 new composite keys.
 That raises the question if we risk to massively increase the amount of data that needs to be shuffled around when assigning each value to 12 instead of just 1 key when grouping the data by the composite key?
 
-Luckily no, Spark will perform a map-side `reduce` using the `Aggregator` first.
+Luckily no, Spark will perform a map-side (aka local) `reduce` using the `Aggregator` first.
 This means all rows of a partition belonging to the same key will be reduced into an accumulator locally.
 Afterwards, these intermediate accumulators, containing a partial aggregation each, will be shuffled and merged.
 This takes advantage of the associative and commutative property of the aggregation (aka combine) function.
 
-The following code snippet show's the translation of `Combine.PerKey` transforms on non-merging windows in the experimental Spark runner:
+The following code snippet shows the translation of `Combine.PerKey` transforms on non-merging windows in the experimental Spark runner:
 
 ```java
 
@@ -133,6 +144,7 @@ Dataset<WindowedValue<KV<KeyT, OutputT>>> aggregatedDataset = dataset
 ### Aggregations on session windows
 
 Sessions are bounded time intervals of activity separated by periods of no input, the gap duration.
+Other than the fixed, non-merging windows discussed above, sessions windows are dynamic in nature and depend on windows of other data points.
 
 The following graph taken from [Beam documentation](https://beam.apache.org/documentation/programming-guide/#session-windows) illustrates this.
 
@@ -141,7 +153,7 @@ The following graph taken from [Beam documentation](https://beam.apache.org/docu
 In Beam, by convention, we append the gap duration to each window.
 This time, the aggregator has to keep track of windows and merge these, as well as associated accumulators, if they intersect.
 
-`Aggregator` and `CombineFn` cannot share the same accumulator type `AccumT` anymore, as done for non-merging windows.
+`Aggregator` and `CombineFn` cannot share the same accumulator type `AccumT` anymore, as done for non-merging windows above.
 To not confuse the different accumulators, we are going to instead call the aggregation state of the `Aggregator` buffer from now on.
 
 #### Canonical window merging in Beam
@@ -203,8 +215,11 @@ Aggregator<
 ```
 
 **Note**:
+
 To reduce complexity for demonstration purposes, we assume a `WindowingStrategy` with timestamp combiner `END_OF_WINDOW`.
-Support for Beam's windowing model is still partial that way. Similar to the way combine function aggregate input values, timestamp combiners aggregate input timestamps to assigne one resulting timestamp to the windowed aggregation result `WindowedValue<OutputT>`.
+Support for Beam's windowing model is still partial that way.
+Similar to the way combine functions aggregate input values, timestamp combiners aggregate input timestamps to assign one resulting timestamp to the windowed aggregation result `WindowedValue<OutputT>`.
+
 In case of the default combiner `END_OF_WINDOW`, this timestamp is always the end of the session `IntervalWindow` and doesn't depend on individual input timestamps. A feature-complete implementation supporting timestamp combiners can be found on [<img src="github.png" style="height:16px;"/> apache/beam](https://github.com/apache/beam/blob/3a4d57eb8976c5f503b32d478a80b1800490f66f/runners/spark/3/src/main/java/org/apache/beam/runners/spark/structuredstreaming/translation/batch/Aggregators.java).
 
 ##### Adding values to the aggregation buffer
@@ -212,7 +227,7 @@ In case of the default combiner `END_OF_WINDOW`, this timestamp is always the en
 Using the sorted tree based aggregation buffer, we can traverse the tree in order starting from the window preceding (or matching the start of) the input window if it intersects the input window, or from the following window otherwise. From there we continue to traverse the tree as long as windows intersect the input window which we continuously expand during the process. Alongside that, we have to merge corresponding accumulators.
 
 Once done, we have to remove all windows we've merged while traversing the tree. And finally add the input value to the merged accumulator (or a new empty accumulator otherwise) and insert it into the tree together with the expanded window.
-Adding the input last to the accumulator helps to avoids unnecessary allocations as we only create a new, empty accumulator if needed.
+Adding the input last to the accumulator helps avoiding unnecessary allocations as we only create a new, empty accumulator if needed.
 
 The following sequence of `reduce` operations for a single key illustrates the above process. The input is highlighted in red:
 
@@ -359,7 +374,7 @@ public TreeMap<IntervalWindow, AccumT> reduce(TreeMap<IntervalWindow, AccumT> bu
 
 ##### Merging aggregation buffers
 
-The idea to merge our tree buffers is simple; we traverse both trees in order and always pick the next smallest window (in time). While it intersects a previous one, we expan the windows and merge the accumulators, if not we add it to a new tree buffer and continue until there's no more windows; once the final window is added we're done.
+The idea to merge our tree buffers is simple; we traverse both trees in order and always pick the next smallest window according to the window start time. While it intersects a previous one, we expan the windows and merge the accumulators, if not we add it to a new tree buffer and continue until there's no more windows; once the final window is added we're done.
 
 The following code implements the merge operation. Once again, the full, feature-complete implementation is available on [<img src="github.png" style="height:16px;"/> apache/beam](https://github.com/apache/beam/blob/3a4d57eb8976c5f503b32d478a80b1800490f66f/runners/spark/3/src/main/java/org/apache/beam/runners/spark/structuredstreaming/translation/batch/Aggregators.java#L231-L271).
 
@@ -409,11 +424,18 @@ public TreeMap<IntervalWindow, AccumT> merge(TreeMap<IntervalWindow, AccumT> buf
 
 ### Nexmark
 
-Apache Beam contains a benchmark suite called Nexmark consisting of multiple "real-world" queries over a three entities model representing an online auction system. Nexmark doesn't necessarily give an accurate overall number as it's running locally and certain aspects such as serialization and shuffling data are simply ignored.
+Apache Beam contains a benchmark suite called Nexmark consisting of multiple "real-world" queries over a three entities model representing an online auction system.
+If you're interested to learn more, I recommend reading the [introduction to nexmark](https://echauchot.blogspot.com/2020/06/nexmark-benchmark-and-ci-tool-for.html) of our colleague Etienne.
 
-Nevertheless, it will give us a decent estimate how the optimized aggregator performs compared to an aggregator using the canonical window merging of Beam when reducing partitions. In the following we're looking at Nexmark Query 11 (user sessions) for 1 million  and 10 million events.
+Nexmark doesn't necessarily give an accurate overall number as it's running locally and certain aspects such as serialization and shuffling data are simply ignored.
+Nevertheless, it will give us a decent estimate how the optimized aggregator performs compared to an aggregator using the canonical window merging of Beam when reducing partitions.
+
+In the following we're looking at Nexmark Query 11 (user sessions).
 
 ##### Results
+
+The boxplot charts below visualize runtime and throughput for 1 million and 10 million input events based on 10 individual benchmark runs in either case.
+The black bar depicts the median.
 
 ```vega-lite
 {
@@ -426,7 +448,7 @@ Nevertheless, it will give us a decent estimate how the optimized aggregator per
       {
         "width": 100,
         "height": 300,
-        "mark": "boxplot",
+        "mark": {"type": "boxplot", "median": {"stroke": "black", "strokeWidth": 1}},
         "transform": [{"filter": {"field": "Events", "equal": "1000000"}}],
         "encoding": {
           "x": {
@@ -435,7 +457,7 @@ Nevertheless, it will give us a decent estimate how the optimized aggregator per
             "title": null,
             "axis": {"labels": false}
           },
-          "color": {"field": "Aggregator", "type": "nominal"},
+          "color": {"field": "Aggregator", "type": "nominal", "scale": {"scheme": "set2"}},
           "y": {
             "field": "Runtime (secs)",
             "type": "quantitative",
@@ -447,7 +469,7 @@ Nevertheless, it will give us a decent estimate how the optimized aggregator per
       {
         "width": 100,
         "height": 300,
-        "mark": "boxplot",
+        "mark": {"type": "boxplot", "median": {"stroke": "black", "strokeWidth": 1}},
         "transform": [{"filter": {"field": "Events", "equal": "1000000"}}],
         "encoding": {
           "x": {
@@ -472,7 +494,7 @@ Nevertheless, it will give us a decent estimate how the optimized aggregator per
       {
         "width": 100,
         "height": 300,
-        "mark": "boxplot",
+        "mark": {"type": "boxplot", "median": {"stroke": "black", "strokeWidth": 1}},
         "transform": [{"filter": {"field": "Events", "equal": "10000000"}}],
         "encoding": {
           "x": {
@@ -493,7 +515,7 @@ Nevertheless, it will give us a decent estimate how the optimized aggregator per
       {
         "width": 100,
         "height": 300,
-        "mark": "boxplot",
+        "mark": {"type": "boxplot", "median": {"stroke": "black", "strokeWidth": 1}},
         "transform": [{"filter": {"field": "Events", "equal": "10000000"}}],
         "encoding": {
           "x": {
@@ -537,6 +559,10 @@ A significant difference between the two scenarios is the amount of session wind
 
 ##### Results
 
+The boxplot charts below visualize reduce operations per second (reduce throughput) for both scenarios based on 25 benchmark iterations each.
+For better readability the two aggregators are presented separately on different scales.
+The black bar depicts the median throughput.
+
 ```vega-lite
 {
   "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
@@ -551,7 +577,7 @@ A significant difference between the two scenarios is the amount of session wind
   "hconcat": [{
     "width": 100,
     "height": 300,
-    "mark": {"type": "boxplot", "size": 15},
+    "mark": {"type": "boxplot", "median": {"stroke": "black", "strokeWidth": 1}},
     "transform": [{"filter": {"field": "Aggregator", "equal": "Canonical"}}],
     "encoding": {
       "color": {"field": "Aggregator"},
@@ -562,7 +588,7 @@ A significant difference between the two scenarios is the amount of session wind
   },{
     "width": 100,
     "height": 300,
-    "mark": "boxplot",
+    "mark": {"type": "boxplot", "median": {"stroke": "black", "strokeWidth": 1}},
     "transform": [{"filter": {"field": "Aggregator", "equal": "Optimized"}}],
     "encoding": {
       "color": {"field": "Aggregator"},
@@ -575,7 +601,6 @@ A significant difference between the two scenarios is the amount of session wind
 ```
 
 - Reduce throughput of the **optimized aggregator** is orders of magnitude higher (400 to 750x).
-  For visibility reasons results are therefore presented on different scales.
 
 - The higher the probability of creating new sessions for the **canonical aggregator**, the more reduce throughput drops.
   - This is due to the overhead of sorting session windows as part of Beam's canonical window merging (see above).
@@ -594,4 +619,4 @@ The full benchmark code is available on [<img src="github.png" style="height:16p
 Using a specialized aggregator on session windows, we can avoid performance bottlenecks due to limitations in Beam's canonical window merging and boost the overall performance of pipelines containing aggregations over session windows when using the experimental Spark dataset runner.
 The actual performance gain will highly depend on the input datasets, but can be very significant if the number of sessions per key is high.
 
-With the effort presented here we are pushing the experimental Spark dataset runner one step further towards a efficient and reliable runner for Apache Beam. Nevertheless, there's a lot more work left to do.
+With the effort presented here we are pushing the experimental Spark dataset runner one step further towards an efficient and reliable runner for Apache Beam. Nevertheless, there's a lot more work left to do.
