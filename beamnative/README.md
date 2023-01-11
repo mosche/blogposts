@@ -386,7 +386,7 @@ invokers in the native image anymore. Though, considering this, it is unexpected
 
 The results seen in this investigation are promising. It is absolutely feasible to run a Beam pipeline locally as native
 image. However, the unexpected high memory usage of the native pipeline - despite the improvement - is somehow a bit
-disappointing. Though, this might be an issue of the local runner.
+disappointing. Though, this might be an issue of the direct runner.
 
 The next step here is to investigate this further with a more performance oriented runner, either using Spark or Flink
 or even a new lightweight in-memory runner developed from scratch.
