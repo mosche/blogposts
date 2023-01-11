@@ -275,7 +275,7 @@ public final class SubstituteDoFnSignatures {
   public static class MapTransformer implements FieldValueTransformer {
     @Override
     public Object transform(Object receiver, Object originalValue) {
-      return new HashMap<>((Map) originalValue);
+      return Collections.unmodifiableMap(new HashMap<>((Map) originalValue));
     }
   }
 
