@@ -42,7 +42,7 @@ the [native-image tool](https://graalvm.github.io/native-build-tools/latest/grad
 .
 
 ```bash
-# pull experiment 
+# pull experiment
 git@github.com:mosche/beam-native-experiment.git
 
 # install GraalVM using SDKman!
@@ -90,7 +90,8 @@ runner. To keep following, pull that branch and build a local Snapshot version o
 gradle -Ppublishing -PdistMgmtSnapshotsUrl=~/.m2/repository/ -p runners/direct-java  publishToMavenLocal -PenableCheckerFramework=false
 ```
 
-Last, but not least, target parallelism of direct runner is set to 4 in the `MinimalWordCount` application itself.
+Last, but not least, target parallelism of direct runner is set to 4 in the `MinimalWordCount` application itself
+and verification features of `DirectRunner` are disabled.
 
 ### Fix usage of dynamic proxies with PipelineOptions
 
@@ -295,7 +296,8 @@ public final class SubstituteDoFnSignatures {
 
 In the following we're going to evaluate performance and memory usage of the native pipeline against the same pipeline
 running on multiple JVMs using an uber jar. Each run is repeated 50 times on a MacBook Pro to gather sufficient data.
-The `time` command is used to gather basic runtime metrics.
+The `time` command is used to gather basic runtime metrics such as time elased and memory usage (RSS). In both cases
+lower values are obviously better.
 
 ```bash
 gradle nativeCompile
@@ -376,11 +378,11 @@ invokers in the native image anymore. Though, considering this, it is unexpected
 |              | JVM - Corretto 8.322 (G1)         | 106.3 s   | 118.9 s   | 130.2 s   | 153.8 s   |
 |              | JVM - Corretto 11.0.16            | 88.2 s    | 102.8 s   | 113.8 s   | 166.9 s   |
 |              | JVM - GraalVM CE 22.3.0 (11.0.17) | 72.8 s    | 85.2 s    | 103.2 s   | 161.2 s   |
-| Max RSS      | Native - Iteration 1              | 390.8 Mb  | 473.7 Mb  | 539.9 Mb  | 752.5 Mb   |
-|              | Native - Iteration 2              | 393.8 Mb  | 487.3 Mb  | 601.3 Mb  | 785.8 Mb  |
-|              | JVM - Corretto 8.322 (G1)         | 661.1 Mb  | 670.3 Mb  | 680.7 Mb  | 692.3 Mb  |
-|              | JVM - Corretto 11.0.16            | 1164.5 Mb | 1175.8 Mb | 1188.6 Mb | 1222.4 Mb |
-|              | JVM - GraalVM CE 22.3.0 (11.0.17) | 1107.3 Mb | 1121.5 Mb | 1139.4 Mb | 1225.6 Mb |
+| Max RSS      | Native - Iteration 1              | 381.6 Mb  | 462.6 Mb  | 527.2 Mb  | 734.9 Mb   |
+|              | Native - Iteration 2              | 384.6 Mb  | 475.9 Mb  | 587.2 Mb  | 767.4 Mb  |
+|              | JVM - Corretto 8.322 (G1)         | 631.5 Mb  | 654.6 Mb  | 664.7 Mb  | 676.1 Mb  |
+|              | JVM - Corretto 11.0.16            | 1137.2 Mb | 1148.2 Mb | 1160.8 Mb | 1193.7 Mb |
+|              | JVM - GraalVM CE 22.3.0 (11.0.17) | 1081.4 Mb | 1095.3 Mb | 1112.7 Mb | 1196.9 Mb |
 
 ### Next steps
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html><html><head>
-      <title>README</title>
+      <title>beamnative</title>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       
@@ -297,7 +297,7 @@ are implemented using dynamic proxies and there&#x2019;s a huge number of possib
 repository <a href="https://github.com/mosche/beam-native-experiment">beam-native-experiment</a> and you have a GraalVM installed locally. Additionally, you have to install
 the <a href="https://graalvm.github.io/native-build-tools/latest/gradle-plugin.html#_installing_graalvm_native_image_tool">native-image tool</a>
 .</p>
-<pre data-role="codeBlock" data-info="bash" class="language-bash"><span class="token comment"># pull experiment </span>
+<pre data-role="codeBlock" data-info="bash" class="language-bash"><span class="token comment"># pull experiment</span>
 git@github.com:mosche/beam-native-experiment.git
 
 <span class="token comment"># install GraalVM using SDKman!</span>
@@ -331,12 +331,13 @@ Luckily, recent versions of GraalVM catch this at build time and fail compilatio
 <p><a href="https://github.com/mosche/beam/tree/beam-native-image">beam-native-image</a> contains the necessary patches for direct
 runner. To keep following, pull that branch and build a local Snapshot version of the direct runner.</p>
 <pre data-role="codeBlock" data-info="bash" class="language-bash">gradle -Ppublishing -PdistMgmtSnapshotsUrl<span class="token operator">=~</span>/.m2/repository/ -p runners/direct-java  publishToMavenLocal -PenableCheckerFramework<span class="token operator">=</span>false
-</pre><p>Last, but not least, target parallelism of direct runner is set to 4 in the <code>MinimalWordCount</code> application itself.</p>
+</pre><p>Last, but not least, target parallelism of direct runner is set to 4 in the <code>MinimalWordCount</code> application itself
+and verification features of <code>DirectRunner</code> are disabled.</p>
 <h3 class="mume-header" id="fix-usage-of-dynamic-proxies-with-pipelineoptions">Fix usage of dynamic proxies with PipelineOptions</h3>
 
 <p>If attempting to run a native image compiled using the generated configuration, we&#x2019;ll immediately notice that the agent
 did not capture all required combinations of interfaces used for <code>PipelineOptions</code>, and order matters.</p>
-<p>Unfortunately the number of interfaces is far to large to naively generate all possible permutations.
+<p>Unfortunately the number of interfaces is far too large to naively generate all possible permutations.
 Instead we have to make sure we create dynamic proxies from a stable, deterministic order of interfaces.</p>
 <p>This requires a small change to Beam&#x2019;s <code>PipelineOptionsFactory</code> to sort the interfaces before dynamic proxies are
 created:</p>
@@ -473,7 +474,7 @@ performance bottleneck.</p>
   <span class="token keyword keyword-public">public</span> <span class="token keyword keyword-static">static</span> <span class="token keyword keyword-class">class</span> <span class="token class-name">MapTransformer</span> <span class="token keyword keyword-implements">implements</span> <span class="token class-name">FieldValueTransformer</span> <span class="token punctuation">{</span>
     <span class="token annotation punctuation">@Override</span>
     <span class="token keyword keyword-public">public</span> <span class="token class-name">Object</span> <span class="token function">transform</span><span class="token punctuation">(</span><span class="token class-name">Object</span> receiver<span class="token punctuation">,</span> <span class="token class-name">Object</span> originalValue<span class="token punctuation">)</span> <span class="token punctuation">{</span>
-      <span class="token keyword keyword-return">return</span> <span class="token keyword keyword-new">new</span> <span class="token class-name">HashMap</span><span class="token generics"><span class="token punctuation">&lt;</span><span class="token punctuation">&gt;</span></span><span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token class-name">Map</span><span class="token punctuation">)</span> originalValue<span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword keyword-return">return</span> <span class="token class-name">Collections</span><span class="token punctuation">.</span><span class="token function">unmodifiableMap</span><span class="token punctuation">(</span><span class="token keyword keyword-new">new</span> <span class="token class-name">HashMap</span><span class="token generics"><span class="token punctuation">&lt;</span><span class="token punctuation">&gt;</span></span><span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token class-name">Map</span><span class="token punctuation">)</span> originalValue<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
     <span class="token punctuation">}</span>
   <span class="token punctuation">}</span>
 
@@ -491,7 +492,8 @@ performance bottleneck.</p>
 
 <p>In the following we&#x2019;re going to evaluate performance and memory usage of the native pipeline against the same pipeline
 running on multiple JVMs using an uber jar. Each run is repeated 50 times on a MacBook Pro to gather sufficient data.
-The <code>time</code> command is used to gather basic runtime metrics.</p>
+The <code>time</code> command is used to gather basic runtime metrics such as time elased and memory usage (RSS). In both cases
+lower values are obviously better.</p>
 <pre data-role="codeBlock" data-info="bash" class="language-bash">gradle nativeCompile
 gradle shadowJar
 
@@ -573,42 +575,42 @@ invokers in the native image anymore. Though, considering this, it is unexpected
 <tr>
 <td>Max RSS</td>
 <td>Native - Iteration 1</td>
-<td>390.8 Mb</td>
-<td>473.7 Mb</td>
-<td>539.9 Mb</td>
-<td>752.5 s</td>
+<td>381.6 Mb</td>
+<td>462.6 Mb</td>
+<td>527.2 Mb</td>
+<td>734.9 Mb</td>
 </tr>
 <tr>
 <td></td>
 <td>Native - Iteration 2</td>
-<td>393.8 Mb</td>
-<td>487.3 Mb</td>
-<td>601.3 Mb</td>
-<td>785.8 Mb</td>
+<td>384.6 Mb</td>
+<td>475.9 Mb</td>
+<td>587.2 Mb</td>
+<td>767.4 Mb</td>
 </tr>
 <tr>
 <td></td>
 <td>JVM - Corretto 8.322 (G1)</td>
-<td>661.1 Mb</td>
-<td>670.3 Mb</td>
-<td>680.7 Mb</td>
-<td>692.3 Mb</td>
+<td>631.5 Mb</td>
+<td>654.6 Mb</td>
+<td>664.7 Mb</td>
+<td>676.1 Mb</td>
 </tr>
 <tr>
 <td></td>
 <td>JVM - Corretto 11.0.16</td>
-<td>1164.5 Mb</td>
-<td>1175.8 Mb</td>
-<td>1188.6 Mb</td>
-<td>1222.4 Mb</td>
+<td>1137.2 Mb</td>
+<td>1148.2 Mb</td>
+<td>1160.8 Mb</td>
+<td>1193.7 Mb</td>
 </tr>
 <tr>
 <td></td>
 <td>JVM - GraalVM CE 22.3.0 (11.0.17)</td>
-<td>1107.3 Mb</td>
-<td>1121.5 Mb</td>
-<td>1139.4 Mb</td>
-<td>1225.6 Mb</td>
+<td>1081.4 Mb</td>
+<td>1095.3 Mb</td>
+<td>1112.7 Mb</td>
+<td>1196.9 Mb</td>
 </tr>
 </tbody>
 </table>
@@ -616,7 +618,7 @@ invokers in the native image anymore. Though, considering this, it is unexpected
 
 <p>The results seen in this investigation are promising. It is absolutely feasible to run a Beam pipeline locally as native
 image. However, the unexpected high memory usage of the native pipeline - despite the improvement - is somehow a bit
-disappointing. Though, this might be an issue of the local runner.</p>
+disappointing. Though, this might be an issue of the direct runner.</p>
 <p>The next step here is to investigate this further with a more performance oriented runner, either using Spark or Flink
 or even a new lightweight in-memory runner developed from scratch.</p>
 
