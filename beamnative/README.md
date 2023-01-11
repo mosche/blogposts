@@ -97,7 +97,7 @@ Last, but not least, target parallelism of direct runner is set to 4 in the `Min
 If attempting to run a native image compiled using the generated configuration, we'll immediately notice that the agent
 did not capture all required combinations of interfaces used for `PipelineOptions`, and order matters.
 
-Unfortunately the number of interfaces is far to large to naively generate all possible permutations.
+Unfortunately the number of interfaces is far too large to naively generate all possible permutations.
 Instead we have to make sure we create dynamic proxies from a stable, deterministic order of interfaces.
 
 This requires a small change to Beam's `PipelineOptionsFactory` to sort the interfaces before dynamic proxies are
