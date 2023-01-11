@@ -378,7 +378,7 @@ invokers in the native image anymore. Though, considering this, it is unexpected
 |              | JVM - Corretto 8.322 (G1)         | 106.3 s   | 118.9 s   | 130.2 s   | 153.8 s   |
 |              | JVM - Corretto 11.0.16            | 88.2 s    | 102.8 s   | 113.8 s   | 166.9 s   |
 |              | JVM - GraalVM CE 22.3.0 (11.0.17) | 72.8 s    | 85.2 s    | 103.2 s   | 161.2 s   |
-| Max RSS      | Native - Iteration 1              | 381.6 Mb  | 462.6 Mb  | 527.2 Mb  | 734.9 Mb   |
+| Max RSS      | Native - Iteration 1              | 381.6 Mb  | 462.6 Mb  | 527.2 Mb  | 734.9 Mb  |
 |              | Native - Iteration 2              | 384.6 Mb  | 475.9 Mb  | 587.2 Mb  | 767.4 Mb  |
 |              | JVM - Corretto 8.322 (G1)         | 631.5 Mb  | 654.6 Mb  | 664.7 Mb  | 676.1 Mb  |
 |              | JVM - Corretto 11.0.16            | 1137.2 Mb | 1148.2 Mb | 1160.8 Mb | 1193.7 Mb |
